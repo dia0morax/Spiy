@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>soodye - لوحة الإدارة</title>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <!-- الخط العربي -->
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --accent: #0284c7;
+      --danger: #ef4444;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'IBM Plex Sans Arabic', -apple-system, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
+      border-bottom: 1.5px solid #0284c7;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 10px rgba(2, 132, 199, 0.08);
+      z-index: 10;
+    }
+    .header-title-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-back {
+      background: #f0f9ff;
+      border: 1px solid #bae6fd;
+      color: #0284c7;
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .brand-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: #0284c7;
+    }
+
+    /* حاوية الشاشات على الهاتف */
+    .views-wrapper {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    .view-screen {
+      position: absolute;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s ease;
+      overflow-y: auto;
+      padding: 14px;
+      gap: 10px;
+    }
+
+    /* التنقل بين الشاشات */
+    #usersView { transform: translateX(0); z-index: 1; opacity: 1; }
+    #sessionsView { transform: translateX(-100%); z-index: 2; opacity: 0; pointer-events: none; }
+    #chatView { transform: translateX(-100%); z-index: 3; opacity: 0; pointer-events: none; }
+
+    body.view-sessions #sessionsView { transform: translateX(0); opacity: 1; pointer-events: auto; }
+    body.view-chat #chatView { transform: translateX(0); opacity: 1; pointer-events: auto; }
+
+    /* بطاقات المستخدمين والجلسات */
+    .admin-card {
+      background: #ffffff;
+      border: 1.5px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+      transition: all 0.2s ease;
+    }
+    .admin-card:active {
+      transform: scale(0.98);
+      background: #f0f9ff;
+      border-color: #38bdf8;
+    }
+    .card-info {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      overflow: hidden;
+      flex: 1;
+    }
+    .card-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #0f172a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .btn-delete-icon {
+      background: #fff5f5;
+      border: 1px solid #fecaca;
+      color: #ef4444;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-right: 8px;
+    }
+
+    /* واجهة عرض الشات المتجاوبة للرسائل */
+    .chat-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex: 1;
+    }
+    .msg-bubble {
+      padding: 12px 14px;
+      border-radius: 16px;
+      font-size: 13.5px;
+      line-height: 1.6;
+      max-width: 90%;
+      word-break: break-word;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .msg-bubble.user {
+      align-self: flex-start;
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      color: #ffffff;
+      border-bottom-left-radius: 4px;
+    }
+    .msg-bubble.ai {
+      align-self: flex-end;
+      background: #ffffff;
+      color: #0f172a;
+      border: 1px solid var(--border);
+      border-bottom-right-radius: 4px;
+    }
+    .msg-meta {
+      font-size: 10.5px;
+      margin-top: 5px;
+      opacity: 0.8;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .info-bar {
+      background: #f0f9ff;
+      border: 1px solid #bae6fd;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 12.5px;
+      color: #0369a1;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-title-box">
+      <button id="backBtn" class="btn-back" onclick="navigateBack()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </button>
+      <span class="brand-title" id="pageTitle">المستخدمين</span>
+    </div>
+    <button onclick="fetchAllData()" style="padding:6px 12px; background:#0284c7; color:#fff; border:none; border-radius:10px; font-size:12px; font-weight:bold; cursor:pointer;">تحديث</button>
+  </header>
+
+  <div class="views-wrapper">
+    
+    <!-- 1. شاشة قائمة المستخدمين -->
+    <div id="usersView" class="view-screen">
+      <div class="info-bar">
+        <span id="usersCountText">جاري الفحص...</span>
+      </div>
+      <div id="usersListContent" style="display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+
+    <!-- 2. شاشة محادثات المستخدم المختار -->
+    <div id="sessionsView" class="view-screen">
+      <div class="info-bar">
+        <span id="sessionsCountText">المحادثات</span>
+        <button onclick="deleteCurrentActiveUser()" style="background:#ef4444; color:#fff; border:none; border-radius:6px; padding:3px 8px; font-size:11px; font-weight:bold;">حذف المستخدم</button>
+      </div>
+      <div id="sessionsListContent" style="display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+
+    <!-- 3. شاشة تفاصيل ورسائل المحادثة المختارة -->
+    <div id="chatView" class="view-screen">
+      <div class="chat-container" id="chatMessagesContent"></div>
+    </div>
+
+  </div>
+
+  <script>
+    // إعدادات Firebase الخاصة بمشروعك
+    const firebaseConfig = {
+      apiKey: "AIzaSyCrK8LlZa3kDRRhj-45AMlOveTBDz8mmN0",
+      authDomain: "soodye-9fc2a.firebaseapp.com",
+      databaseURL: "https://soodye-9fc2a-default-rtdb.firebaseio.com",
+      projectId: "soodye-9fc2a"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let rawData = {};
+    let currentNavState = "users"; // users -> sessions -> chat
+    let selectedUid = null;
+    let selectedSessionId = null;
+
+    function fetchAllData() {
+      db.ref("users").once("value", snapshot => {
+        rawData = snapshot.val() || {};
+        renderUsersList();
+        if (selectedUid && rawData[selectedUid]) {
+          renderSessionsList(selectedUid);
+        }
+      });
+    }
+
+    function renderUsersList() {
+      const container = document.getElementById("usersListContent");
+      container.innerHTML = "";
+      const uids = Object.keys(rawData);
+      document.getElementById("usersCountText").innerText = `إجمالي الحسابات المسجلة: ${uids.length}`;
+
+      if (uids.length === 0) {
+        container.innerHTML = `<div style="text-align:center; padding:30px; color:#64748b; font-size:13px;">لا توجد حسابات مسجلة بعد</div>`;
+        return;
+      }
+
+      uids.forEach(uid => {
+        const uData = rawData[uid];
+        const sessions = uData.sessions || {};
+        const count = Object.keys(sessions).length;
+
+        const card = document.createElement("div");
+        card.className = "admin-card";
+        card.innerHTML = `
+          <div class="card-info">
+            <span class="card-title">👤 ${uid.slice(0, 16)}...</span>
+            <span class="card-sub">عدد المحادثات: ${count}</span>
+          </div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        `;
+        card.onclick = () => openSessionsView(uid);
+        container.appendChild(card);
+      });
+    }
+
+    function openSessionsView(uid) {
+      selectedUid = uid;
+      currentNavState = "sessions";
+      document.body.className = "view-sessions";
+      document.getElementById("backBtn").style.display = "inline-flex";
+      document.getElementById("pageTitle").innerText = `محادثات: ${uid.slice(0, 8)}...`;
+      renderSessionsList(uid);
+    }
+
+    function renderSessionsList(uid) {
+      const container = document.getElementById("sessionsListContent");
+      container.innerHTML = "";
+      const sessions = rawData[uid]?.sessions || {};
+      const sKeys = Object.keys(sessions);
+
+      document.getElementById("sessionsCountText").innerText = `المحادثات المحفوظة: ${sKeys.length}`;
+
+      if (sKeys.length === 0) {
+        container.innerHTML = `<div style="text-align:center; padding:30px; color:#64748b; font-size:13px;">لا توجد محادثات محفوظة</div>`;
+        return;
+      }
+
+      sKeys.reverse().forEach(sId => {
+        const s = sessions[sId];
+        const card = document.createElement("div");
+        card.className = "admin-card";
+        card.innerHTML = `
+          <div class="card-info">
+            <span class="card-title">💬 ${s.title || 'محادثة بدون عنوان'}</span>
+            <span class="card-sub">${s.updatedAt ? new Date(s.updatedAt).toLocaleTimeString('ar-EG') : 'بدون وقت'}</span>
+          </div>
+          <button class="btn-delete-icon" onclick="deleteSessionDirect(event, '${uid}', '${sId}')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          </button>
+        `;
+        card.onclick = () => openChatView(uid, sId);
+        container.appendChild(card);
+      });
+    }
+
+    function openChatView(uid, sId) {
+      selectedSessionId = sId;
+      currentNavState = "chat";
+      document.body.className = "view-sessions view-chat";
+      document.getElementById("pageTitle").innerText = rawData[uid]?.sessions?.[sId]?.title || "نص المحادثة";
+
+      const container = document.getElementById("chatMessagesContent");
+      container.innerHTML = "";
+
+      const messages = rawData[uid]?.sessions?.[sId]?.messages || {};
+      const msgList = Object.values(messages);
+
+      if (msgList.length === 0) {
+        container.innerHTML = `<div style="text-align:center; padding:30px; color:#64748b; font-size:13px;">لا توجد رسائل مسجلة</div>`;
+        return;
+      }
+
+      msgList.forEach(m => {
+        const bubble = document.createElement("div");
+        bubble.className = `msg-bubble ${m.role === 'user' ? 'user' : 'ai'}`;
+        const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('ar-EG') : '';
+        bubble.innerHTML = `
+          <div style="font-weight:700; font-size:11.5px; margin-bottom:4px; opacity:0.9;">${m.role === 'user' ? 'المستخدم' : (m.modelName || 'soodye')}:</div>
+          <div>${m.content}</div>
+          <div class="msg-meta">${time}</div>
+        `;
+        container.appendChild(bubble);
+      });
+    }
+
+    // زر الرجوع الشجري في الموبايل
+    function navigateBack() {
+      if (currentNavState === "chat") {
+        currentNavState = "sessions";
+        document.body.className = "view-sessions";
+        document.getElementById("pageTitle").innerText = `محادثات: ${selectedUid.slice(0, 8)}...`;
+      } else if (currentNavState === "sessions") {
+        currentNavState = "users";
+        document.body.className = "";
+        document.getElementById("backBtn").style.display = "none";
+        document.getElementById("pageTitle").innerText = "المستخدمين";
+        selectedUid = null;
+      }
+    }
+
+    // حذف جلسة فردية
+    function deleteSessionDirect(e, uid, sId) {
+      e.stopPropagation();
+      if (confirm("هل تريد حذف هذه المحادثة بالكامل؟")) {
+        db.ref(`users/${uid}/sessions/${sId}`).remove().then(() => {
+          delete rawData[uid].sessions[sId];
+          renderSessionsList(uid);
+        });
+      }
+    }
+
+    // مسح الحساب ومخلفاته بالكامل
+    function deleteCurrentActiveUser() {
+      if (!selectedUid) return;
+      if (confirm(`هل تريد مسح هذا الحساب ومحادثاته نهائياً لتفريغ السيرفر؟`)) {
+        db.ref(`users/${selectedUid}`).remove().then(() => {
+          delete rawData[selectedUid];
+          navigateBack();
+          renderUsersList();
+        });
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", fetchAllData);
+  </script>
+</body>
+</html>
