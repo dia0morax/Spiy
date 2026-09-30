@@ -154,6 +154,44 @@
       margin-right: 8px;
     }
 
+    /* ستايل البطاقات المحذوفة من قِبل المستخدم */
+    .admin-card.deleted-session {
+      background: #fffafa !important;
+      border: 1.5px solid #fca5a5 !important;
+      box-shadow: 0 2px 8px rgba(239, 68, 68, 0.08) !important;
+    }
+    .admin-card.deleted-session .card-title {
+      color: #dc2626 !important;
+    }
+    .badge-deleted {
+      background: #fee2e2;
+      color: #b91c1c;
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      border: 1px solid #fecaca;
+    }
+    .btn-hard-delete {
+      background: #ef4444 !important;
+      color: #ffffff !important;
+      border: none !important;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+      box-shadow: 0 2px 6px rgba(239, 68, 68, 0.25);
+    }
+
+
     /* واجهة عرض الشات المتجاوبة للرسائل */
     .chat-container {
       display: flex;
@@ -316,7 +354,8 @@
       const sessions = rawData[uid]?.sessions || {};
       const sKeys = Object.keys(sessions);
 
-      document.getElementById("sessionsCountText").innerText = `المحادثات المحفوظة: ${sKeys.length}`;
+      const deletedCount = sKeys.filter(k => sessions[k].isDeleted).length;
+      document.getElementById("sessionsCountText").innerHTML = `<span>إجمالي: ${sKeys.length}</span> <span style="color:#ef4444; font-size:11px;">(المحذوفة: ${deletedCount})</span>`;
 
       if (sKeys.length === 0) {
         container.innerHTML = `<div style="text-align:center; padding:30px; color:#64748b; font-size:13px;">لا توجد محادثات محفوظة</div>`;
@@ -325,21 +364,49 @@
 
       sKeys.reverse().forEach(sId => {
         const s = sessions[sId];
+        const isDeleted = !!s.isDeleted;
         const card = document.createElement("div");
-        card.className = "admin-card";
+        card.className = `admin-card ${isDeleted ? 'deleted-session' : ''}`;
+        
         card.innerHTML = `
           <div class="card-info">
-            <span class="card-title">💬 ${s.title || 'محادثة بدون عنوان'}</span>
-            <span class="card-sub">${s.updatedAt ? new Date(s.updatedAt).toLocaleTimeString('ar-EG') : 'بدون وقت'}</span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="card-title">${isDeleted ? '🗑️' : '💬'} ${s.title || 'محادثة بدون عنوان'}</span>
+              ${isDeleted ? `<span class="badge-deleted">محذوفة من المستخدم</span>` : ''}
+            </div>
+            <span class="card-sub">
+              ${s.updatedAt ? new Date(s.updatedAt).toLocaleTimeString('ar-EG') : 'بدون وقت'}
+              ${isDeleted ? ' • (مخفية عن حسابه وتنتظر الحذف النهائي)' : ''}
+            </span>
           </div>
-          <button class="btn-delete-icon" onclick="deleteSessionDirect(event, '${uid}', '${sId}')">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-          </button>
+
+          ${isDeleted ? `
+            <button class="btn-hard-delete" onclick="hardDeleteSession(event, '${uid}', '${sId}')" title="حذف نهائي دائم من قاعدة البيانات">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              <span>حذف نهائي</span>
+            </button>
+          ` : `
+            <button class="btn-delete-icon" onclick="deleteSessionDirect(event, '${uid}', '${sId}')" title="حذف">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+          `}
         `;
         card.onclick = () => openChatView(uid, sId);
         container.appendChild(card);
       });
     }
+
+    // حذف نهائي دائم من فايربيس للمحادثات المحذوفة
+    function hardDeleteSession(e, uid, sId) {
+      e.stopPropagation();
+      if (confirm("⚠️ هل أنت متأكد من الحذف النهائي؟ سيتم مسح سجل المحادثة نهائياً من فايربيس ولن يمكن استرجاعها.")) {
+        db.ref(`users/${uid}/sessions/${sId}`).remove().then(() => {
+          delete rawData[uid].sessions[sId];
+          renderSessionsList(uid);
+        });
+      }
+    }
+
 
     function openChatView(uid, sId) {
       selectedSessionId = sId;
