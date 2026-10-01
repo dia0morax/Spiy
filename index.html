@@ -361,26 +361,37 @@
       const container = document.getElementById("usersListContent");
       container.innerHTML = "";
       const uids = Object.keys(rawData);
-      document.getElementById("usersCountText").innerText = `إجمالي الحسابات المسجلة: ${uids.length}`;
+      document.getElementById("usersCountText").innerText = `إجمالي الحسابات والضيوف: ${uids.length}`;
 
       if (uids.length === 0) {
-        container.innerHTML = `<div style="text-align:center; padding:30px; color:#64748b; font-size:13px;">لا توجد حسابات مسجلة بعد</div>`;
+        container.innerHTML = `<div style="text-align:center; padding:30px; color:#64748b; font-size:13px;">لا توجد حسابات أو ضيوف بعد</div>`;
         return;
       }
 
       uids.forEach(uid => {
-        const uData = rawData[uid];
+        const uData = rawData[uid] || {};
         const sessions = uData.sessions || {};
         const count = Object.keys(sessions).length;
+        const isGuest = uid.startsWith("guest_") || (uData.profile && uData.profile.isGuest);
         const alias = getUserAlias(uid);
-        const displayName = alias ? `👤 ${alias}` : `👤 ${uid.slice(0, 16)}...`;
+
+        let defaultName = isGuest ? `🎭 ضيف (${uid.slice(-4)})` : `👤 ${uid.slice(0, 14)}...`;
+        if (uData.profile && uData.profile.displayName && !isGuest) {
+          defaultName = `👤 ${uData.profile.displayName}`;
+        }
+        const displayName = alias ? `${isGuest ? '🎭' : '👤'} ${alias}` : defaultName;
 
         const card = document.createElement("div");
         card.className = "admin-card";
+        if (isGuest) {
+          card.style.borderColor = "#bae6fd";
+          card.style.background = "#f0f9ff";
+        }
         card.innerHTML = `
           <div class="card-info">
             <span class="card-title">
               <span style="overflow:hidden; text-overflow:ellipsis;">${displayName}</span>
+              ${isGuest ? '<span style="font-size:10px; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; font-weight:bold;">ضيف</span>' : ''}
               <button class="btn-edit-alias" onclick="setUserAlias(event, '${uid}')" title="تعديل الاسم ظاهرياً">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
               </button>
@@ -393,6 +404,7 @@
         container.appendChild(card);
       });
     }
+
 
     function openSessionsView(uid) {
       selectedUid = uid;
