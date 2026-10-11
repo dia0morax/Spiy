@@ -264,7 +264,32 @@
       align-items: center;
       margin-bottom: 4px;
     }
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #475569;
+      margin: 12px 4px 4px 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .unread-dot {
+      width: 10px;
+      height: 10px;
+      background-color: #22c55e;
+      border-radius: 50%;
+      display: inline-block;
+      box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+      flex-shrink: 0;
+      animation: pulseDot 1.8s infinite;
+    }
+    @keyframes pulseDot {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.2); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
   </style>
+
 </head>
 <body>
 
@@ -322,14 +347,61 @@
     let selectedSessionId = null;
 
     function fetchAllData() {
-      db.ref("users").once("value", snapshot => {
+      // الاستماع التلقائي اللحظي المباشر لقاعدة البيانات
+      db.ref("users").on("value", snapshot => {
         rawData = snapshot.val() || {};
-        renderUsersList();
+
+        // تحديث قائمة المستخدمين تلقائياً
+        if (currentNavState === "users") {
+          renderUsersList();
+        }
+
+        // تحديث قائمة المحادثات تلقائياً إذا كنت داخل مستخدم معين
         if (selectedUid && rawData[selectedUid]) {
-          renderSessionsList(selectedUid);
+          if (currentNavState === "sessions") {
+            renderSessionsList(selectedUid);
+          }
+          // تحديث شاشة الرسائل فورياً إذا وصلت رسالة جديدة أثناء فتح الشات
+          if (currentNavState === "chat" && selectedSessionId) {
+            renderMessagesOnly(selectedUid, selectedSessionId);
+          }
         }
       });
     }
+
+    // دالة مساعدة لتحديث الرسائل داخل الشات فورياً دون إغلاقه
+    function renderMessagesOnly(uid, sId) {
+      const container = document.getElementById("chatMessagesContent");
+      if (!container) return;
+      container.innerHTML = "";
+      const messages = rawData[uid]?.sessions?.[sId]?.messages || {};
+      const msgList = Object.values(messages);
+
+      if (msgList.length === 0) {
+        container.innerHTML = `<div style="text-align:center; padding:30px; color:#64748b; font-size:13px;">لا توجد رسائل مسجلة</div>`;
+        return;
+      }
+
+      msgList.forEach(m => {
+        const bubble = document.createElement("div");
+        bubble.className = `msg-bubble ${m.role === 'user' ? 'user' : 'ai'}`;
+        const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('ar-EG') : '';
+        bubble.innerHTML = `
+          <div style="font-weight:700; font-size:11.5px; margin-bottom:4px; opacity:0.9;">${m.role === 'user' ? 'المستخدم' : (m.modelName || 'soodye')}:</div>
+          <div>${m.content}</div>
+          <div class="msg-meta">${time}</div>
+        `;
+        container.appendChild(bubble);
+      });
+
+      // وضع علامة القراءة تلقائياً مادام الشات مفتوحاً أمامك
+      const s = rawData[uid]?.sessions?.[sId];
+      if (s) {
+        const latestTime = getSessionLatestTime(s);
+        setSessionRead(uid, sId, latestTime || Date.now());
+      }
+    }
+
 
     // إدارة الأسماء المستعارة محلياً (ظاهرياً فقط)
     function getUserAlias(uid) {
@@ -357,7 +429,53 @@
       }
     }
 
-function renderUsersList() {
+    // دوال تتبع قراءة الرسائل وتحديد الأحدث
+    function getReadTimestamps() {
+      return JSON.parse(localStorage.getItem("admin_read_timestamps") || "{}");
+    }
+
+    function setSessionRead(uid, sId, time) {
+      const timestamps = getReadTimestamps();
+      timestamps[`${uid}_${sId}`] = time || Date.now();
+      localStorage.setItem("admin_read_timestamps", JSON.stringify(timestamps));
+    }
+
+    function getSessionLatestTime(session) {
+      let latest = session?.updatedAt || 0;
+      if (typeof latest === "string") latest = new Date(latest).getTime() || 0;
+      const msgs = session?.messages || {};
+      Object.values(msgs).forEach(m => {
+        let t = m.timestamp || 0;
+        if (typeof t === "string") t = new Date(t).getTime() || 0;
+        if (t > latest) latest = t;
+      });
+      return latest;
+    }
+
+    function getUserLatestTime(uid) {
+      const sessions = rawData[uid]?.sessions || {};
+      let maxTime = 0;
+      Object.values(sessions).forEach(s => {
+        const t = getSessionLatestTime(s);
+        if (t > maxTime) maxTime = t;
+      });
+      return maxTime;
+    }
+
+    function isSessionUnread(uid, sId, session) {
+      const latestTime = getSessionLatestTime(session);
+      if (!latestTime) return false;
+      const timestamps = getReadTimestamps();
+      const lastRead = timestamps[`${uid}_${sId}`] || 0;
+      return latestTime > lastRead;
+    }
+
+    function isUserUnread(uid) {
+      const sessions = rawData[uid]?.sessions || {};
+      return Object.keys(sessions).some(sId => isSessionUnread(uid, sId, sessions[sId]));
+    }
+
+    function renderUsersList() {
       const container = document.getElementById("usersListContent");
       container.innerHTML = "";
       const uids = Object.keys(rawData);
@@ -368,20 +486,37 @@ function renderUsersList() {
         return;
       }
 
+      // فرز المستخدمين حسب أحدث رسالة (الأحدث أولاً بالقمة)
+      uids.sort((a, b) => getUserLatestTime(b) - getUserLatestTime(a));
+
+      const registeredUsers = [];
+      const guestUsers = [];
+
       uids.forEach(uid => {
+        const uData = rawData[uid] || {};
+        const isGuest = uid.startsWith("guest_") || !!uData.isGuest;
+        if (isGuest) {
+          guestUsers.push(uid);
+        } else {
+          registeredUsers.push(uid);
+        }
+      });
+
+      function buildUserCard(uid, isGuest) {
         const uData = rawData[uid] || {};
         const sessions = uData.sessions || {};
         const count = Object.keys(sessions).length;
         const alias = getUserAlias(uid);
-        const isGuest = uid.startsWith("guest_") || !!uData.isGuest;
         const defaultName = isGuest ? `🎭 ضيف (${uid.replace('guest_', '').slice(0, 8)})` : `👤 ${uid.slice(0, 16)}...`;
         const displayName = alias ? (isGuest ? `🎭 ${alias} (ضيف)` : `👤 ${alias}`) : defaultName;
+        const hasUnread = isUserUnread(uid);
 
         const card = document.createElement("div");
         card.className = "admin-card";
         card.innerHTML = `
           <div class="card-info">
             <span class="card-title">
+              ${hasUnread ? '<span class="unread-dot" title="رسالة جديدة"></span>' : ''}
               <span style="overflow:hidden; text-overflow:ellipsis;">${displayName}</span>
               <button class="btn-edit-alias" onclick="setUserAlias(event, '${uid}')" title="تعديل الاسم ظاهرياً">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
@@ -392,8 +527,38 @@ function renderUsersList() {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
         `;
         card.onclick = () => openSessionsView(uid);
-        container.appendChild(card);
-      });
+        return card;
+      }
+
+      // 1. قسم الحسابات المسجلة
+      const regHeader = document.createElement("div");
+      regHeader.className = "section-title";
+      regHeader.innerHTML = `<span>👤 المستخدمين بحساب (${registeredUsers.length})</span>`;
+      container.appendChild(regHeader);
+
+      if (registeredUsers.length === 0) {
+        const emptyMsg = document.createElement("div");
+        emptyMsg.style.cssText = "font-size:12px; color:#94a3b8; padding:8px 12px;";
+        emptyMsg.innerText = "لا يوجد مستخدمين مسجلين بحساب";
+        container.appendChild(emptyMsg);
+      } else {
+        registeredUsers.forEach(uid => container.appendChild(buildUserCard(uid, false)));
+      }
+
+      // 2. قسم الضيوف
+      const guestHeader = document.createElement("div");
+      guestHeader.className = "section-title";
+      guestHeader.innerHTML = `<span>🎭 الضيوف (${guestUsers.length})</span>`;
+      container.appendChild(guestHeader);
+
+      if (guestUsers.length === 0) {
+        const emptyGuest = document.createElement("div");
+        emptyGuest.style.cssText = "font-size:12px; color:#94a3b8; padding:8px 12px;";
+        emptyGuest.innerText = "لا يوجد ضيوف حالياً";
+        container.appendChild(emptyGuest);
+      } else {
+        guestUsers.forEach(uid => container.appendChild(buildUserCard(uid, true)));
+      }
     }
 
     function openSessionsView(uid) {
@@ -409,7 +574,6 @@ function renderUsersList() {
       renderSessionsList(uid);
     }
 
-
     function renderSessionsList(uid) {
       const container = document.getElementById("sessionsListContent");
       container.innerHTML = "";
@@ -424,15 +588,20 @@ function renderUsersList() {
         return;
       }
 
-      sKeys.reverse().forEach(sId => {
+      // فرز المحادثات حسب توقيت آخر رسالة (الأحدث بالقمة)
+      sKeys.sort((a, b) => getSessionLatestTime(sessions[b]) - getSessionLatestTime(sessions[a]));
+
+      sKeys.forEach(sId => {
         const s = sessions[sId];
         const isDeleted = !!s.isDeleted;
+        const hasUnread = !isDeleted && isSessionUnread(uid, sId, s);
         const card = document.createElement("div");
         card.className = `admin-card ${isDeleted ? 'deleted-session' : ''}`;
         
         card.innerHTML = `
           <div class="card-info">
             <div style="display:flex; align-items:center; gap:6px;">
+              ${hasUnread ? '<span class="unread-dot" title="رسالة جديدة"></span>' : ''}
               <span class="card-title">${isDeleted ? '🗑️' : '💬'} ${s.title || 'محادثة بدون عنوان'}</span>
               ${isDeleted ? `<span class="badge-deleted">محذوفة من المستخدم</span>` : ''}
             </div>
@@ -469,18 +638,23 @@ function renderUsersList() {
       }
     }
 
-
     function openChatView(uid, sId) {
       selectedSessionId = sId;
       currentNavState = "chat";
       document.body.className = "view-sessions view-chat";
       document.getElementById("pageTitle").innerText = rawData[uid]?.sessions?.[sId]?.title || "نص المحادثة";
 
+      // تسجيل قراءة المحادثة لإخفاء النقطة الخضراء
+      const s = rawData[uid]?.sessions?.[sId];
+      const latestTime = getSessionLatestTime(s);
+      setSessionRead(uid, sId, latestTime || Date.now());
+
       const container = document.getElementById("chatMessagesContent");
       container.innerHTML = "";
 
       const messages = rawData[uid]?.sessions?.[sId]?.messages || {};
       const msgList = Object.values(messages);
+
 
       if (msgList.length === 0) {
         container.innerHTML = `<div style="text-align:center; padding:30px; color:#64748b; font-size:13px;">لا توجد رسائل مسجلة</div>`;
@@ -505,15 +679,21 @@ function renderUsersList() {
       if (currentNavState === "chat") {
         currentNavState = "sessions";
         document.body.className = "view-sessions";
-        document.getElementById("pageTitle").innerText = `محادثات: ${selectedUid.slice(0, 8)}...`;
+        const alias = getUserAlias(selectedUid);
+        const isGuest = selectedUid.startsWith("guest_") || !!rawData[selectedUid]?.isGuest;
+        const defaultName = isGuest ? `ضيف (${selectedUid.replace('guest_', '').slice(0, 8)})` : `${selectedUid.slice(0, 8)}...`;
+        document.getElementById("pageTitle").innerText = `محادثات: ${alias || defaultName}`;
+        renderSessionsList(selectedUid);
       } else if (currentNavState === "sessions") {
         currentNavState = "users";
         document.body.className = "";
         document.getElementById("backBtn").style.display = "none";
         document.getElementById("pageTitle").innerText = "المستخدمين";
         selectedUid = null;
+        renderUsersList();
       }
     }
+
 
     // حذف جلسة فردية
     function deleteSessionDirect(e, uid, sId) {
